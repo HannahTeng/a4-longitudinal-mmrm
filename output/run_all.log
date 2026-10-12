@@ -1,0 +1,40 @@
+== R/01_derive_adsl.R
+ADSL: 6945 subjects; mITT n = 1147; OBS (placebo + LEARN) n = 1129
+== R/02_derive_adqs.R
+CHG vs released change-from-baseline: max |diff| = 1.00e-06
+ADQS rows: 15553 | subjects: 1707
+== R/03_mmrm_primary.R
+MMRM analysis set: 1115 subjects, 9493 post-baseline PACC records
+
+=== Treatment difference (Solanezumab - Placebo), change from baseline PACC ===
+     AVISIT estimate    SE        df  lower upper p.value
+1   Week 24   -0.069 0.103 1105.2576 -0.271 0.134   0.510
+2   Week 48   -0.059 0.109 1075.1860 -0.273 0.156   0.590
+3   Week 72   -0.181 0.115 1034.3916 -0.407 0.045   0.120
+4   Week 96   -0.091 0.137 1016.4389 -0.359 0.178   0.510
+5  Week 120   -0.219 0.145  993.4741 -0.503 0.065   0.130
+6  Week 144   -0.068 0.168  976.6198 -0.397 0.261   0.680
+7  Week 168   -0.347 0.196  976.7062 -0.731 0.037   0.076
+8  Week 192   -0.290 0.227  946.5329 -0.736 0.156   0.200
+9  Week 216   -0.226 0.266  941.4301 -0.749 0.297   0.400
+10 Week 240   -0.322 0.311  879.5573 -0.932 0.287   0.300
+
+QC: max |coef(mmrm) - coef(gls)| = 1.56e-04
+== R/04_amyloid_slope.R
+Aim 2 analysis set: 1127 subjects, 10200 PACC records
+
+=== Random-slope LMM fixed effects (PACC units) ===
+# A tibble: 7 x 4
+  term            estimate std.error statistic
+  <chr>              <dbl>     <dbl>     <dbl>
+1 (Intercept)      10.4      1.06         9.82
+2 CENT10           -0.0692   0.0178      -3.89
+3 YEARS             0.121    0.0285       4.26
+4 AGEYR            -0.167    0.0138     -12.1 
+5 EDCCNTU           0.138    0.0227       6.09
+6 APOE4_ANcarrier  -0.170    0.141       -1.21
+7 CENT10:YEARS     -0.0585   0.00527    -11.1 
+Interpretation: each +10 centiloids changes the annual PACC slope by -0.058 (SE 0.005)
+In AVISIT there are dropped visits: Week 0.
+ Additional attributes including contrasts are lost.
+To avoid this behavior, make sure use `drop_visit_levels = FALSE`.

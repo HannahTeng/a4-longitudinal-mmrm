@@ -1,0 +1,5 @@
+# Export derived datasets as CSV for the SAS double-programming scripts (sas/*.sas)
+source("R/00_config.R")
+readRDS(file.path(DERIVED_DIR, "adsl.rds"))      %>% write_csv(file.path(DERIVED_DIR, "adsl.csv"), na = "")
+readRDS(file.path(DERIVED_DIR, "adqs_pacc.rds")) %>% write_csv(file.path(DERIVED_DIR, "adqs_pacc.csv"), na = "")
+message("CSV exports written to data/derived/")
