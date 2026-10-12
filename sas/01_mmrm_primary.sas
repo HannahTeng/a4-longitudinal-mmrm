@@ -32,6 +32,17 @@ run;
 
 proc print data=tx_diff noobs label; title "SAS PROC MIXED: Solanezumab - Placebo, change from baseline PACC"; run;
 
-proc export data=tx_diff outfile="&root./aim1_sas_tx_difference.csv" dbms=csv replace; run;
-data lsm_out; set lsm; format Estimate StdErr DF Lower Upper best16.; run;
-proc export data=lsm_out    outfile="&root./aim1_sas_lsmeans.csv"       dbms=csv replace; run;
+/* full-precision CSV export; data _null_ + put ignores the d8.4 formats that PROC EXPORT would inherit */
+data _null_;
+  set tx_diff;
+  file "&root./aim1_sas_tx_difference.csv" dsd lrecl=32767;
+  if _n_ = 1 then put "AVISIT,Estimate,StdErr,DF,Probt,Lower,Upper";
+  put AVISIT :$8. Estimate :best32. StdErr :best32. DF :best32. Probt :best32. Lower :best32. Upper :best32.;
+run;
+
+data _null_;
+  set lsm;
+  file "&root./aim1_sas_lsmeans.csv" dsd lrecl=32767;
+  if _n_ = 1 then put "Effect,TX,AVISIT,Estimate,StdErr,DF,tValue,Probt,Alpha,Lower,Upper";
+  put Effect :$20. TX :$20. AVISIT :$8. Estimate :best32. StdErr :best32. DF :best32. tValue :best32. Probt :best32. Alpha :best32. Lower :best32. Upper :best32.;
+run;
