@@ -3,8 +3,8 @@
   (a) random intercept/slope model on PACC composite (A4 placebo + LEARN)
   (b) covariance-structure comparison for the MMRM on change from baseline
 --------------------------------------------------------------------*/
-%let root = /home/&sysuserid./a4-longitudinal-mmrm;
-libname a4 "&root./data/derived";
+%let root = /home/&sysuserid./A4;   /* flat SAS ODA folder holding the CSVs and these scripts */
+libname a4 "&root.";
 
 data obs;
   set a4.adqs;
@@ -25,7 +25,7 @@ proc mixed data=obs method=reml;
   model AVAL = CENT10 YEARS CENT10*YEARS AGEYR EDCCNTU APOE4_AN / solution ddfm=kr;
   random intercept YEARS / subject=BID type=un;
 run;
-proc export data=aim2_fixed outfile="&root./output/tables/aim2_sas_lmm_fixed.csv" dbms=csv replace; run;
+proc export data=aim2_fixed outfile="&root./aim2_sas_lmm_fixed.csv" dbms=csv replace; run;
 
 /* (b) covariance structures on change from baseline (post-baseline visits) */
 data obs_chg; set obs; where AVISITN > 0 and not missing(CHG); run;

@@ -4,8 +4,8 @@
         unstructured covariance, Kenward-Roger df, REML
   Output to reconcile with output/tables/aim1_mmrm_tx_difference.csv
 --------------------------------------------------------------------*/
-%let root = /home/&sysuserid./a4-longitudinal-mmrm;
-libname a4 "&root./data/derived";
+%let root = /home/&sysuserid./A4;   /* flat SAS ODA folder holding the CSVs and these scripts */
+libname a4 "&root.";
 
 data mitt;
   set a4.adqs;
@@ -27,9 +27,11 @@ data tx_diff;
   set diffs;
   where AVISIT = _AVISIT and TX = "Solanezumab" and _TX = "Placebo";
   keep AVISIT Estimate StdErr DF Lower Upper Probt;
+  format Estimate StdErr DF Lower Upper best16. Probt best16.;   /* full precision for CSV export (default d8.4 rounds to 4 dp) */
 run;
 
 proc print data=tx_diff noobs label; title "SAS PROC MIXED: Solanezumab - Placebo, change from baseline PACC"; run;
 
-proc export data=tx_diff outfile="&root./output/tables/aim1_sas_tx_difference.csv" dbms=csv replace; run;
-proc export data=lsm     outfile="&root./output/tables/aim1_sas_lsmeans.csv"       dbms=csv replace; run;
+proc export data=tx_diff outfile="&root./aim1_sas_tx_difference.csv" dbms=csv replace; run;
+data lsm_out; set lsm; format Estimate StdErr DF Lower Upper best16.; run;
+proc export data=lsm_out    outfile="&root./aim1_sas_lsmeans.csv"       dbms=csv replace; run;
