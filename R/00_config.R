@@ -1,6 +1,6 @@
 # ------------------------------------------------------------------
-# 00_config.R — paths, population flags, analysis constants
-# A4 Longitudinal Cognitive Decline — MMRM analysis pipeline
+# 00_config.R: paths, population flags, analysis constants
+# A4 Longitudinal Cognitive Decline: MMRM analysis pipeline
 # ------------------------------------------------------------------
 suppressPackageStartupMessages({
   library(dplyr); library(tidyr); library(readr); library(stringr); library(forcats)

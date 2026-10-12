@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------
-# make_synthetic.R — simulate a longitudinal cognitive-study dataset with the
+# make_synthetic.R: simulate a longitudinal cognitive-study dataset with the
 # STRUCTURE of A4/LEARN (3 cohorts, PACC every 24 weeks to week 240, MAR-type dropout)
 # from the fitted Aim 2 random-slope model, so the public dashboard contains no
 # real participant data.  Run from the repo root after R/04_amyloid_slope.R.

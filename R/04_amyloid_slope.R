@@ -1,8 +1,8 @@
 # ------------------------------------------------------------------
-# 04_amyloid_slope.R — Aim 2: amyloid burden x time on PACC in untreated participants
+# 04_amyloid_slope.R: Aim 2: amyloid burden x time on PACC in untreated participants
 # Population: A4 placebo arm + LEARN (amyloid-negative), double-blind-period visits
 # (a) random-intercept/slope LMM:  PACC ~ AMYLCENT*WEEK + covariates + (1 + WEEK | BID)
-# (b) MMRM with amyloid tertile x visit (categorical-time analogue)
+# (b) MMRM with amyloid group (<20, 20 to <50, >=50 CL) x visit (categorical-time analogue)
 # (c) covariance-structure comparison for the marginal model (UN / AR1 / CS / heterogeneous)
 # ------------------------------------------------------------------
 source("R/00_config.R")
@@ -25,11 +25,12 @@ cat("\n=== Random-slope LMM fixed effects (PACC units) ===\n"); print(lmm_tab, n
 cat(sprintf("Interpretation: each +10 centiloids changes the annual PACC slope by %.3f (SE %.3f)\n",
             lmm_tab$estimate[lmm_tab$term == "CENT10:YEARS"], lmm_tab$std.error[lmm_tab$term == "CENT10:YEARS"]))
 
-# (b) MMRM by amyloid tertile (post-baseline change)
+# (b) MMRM by amyloid group (post-baseline change)
 obs_chg <- obs %>% filter(AVISITN > 0, !is.na(CHG)) %>%
-  mutate(AMYL_GRP = cut(AMYLCENT, c(-Inf, 20, 50, Inf), labels = c("<20 CL", "20-50 CL", ">50 CL")))
+  mutate(AVISIT = droplevels(AVISIT),
+         AMYL_GRP = cut(AMYLCENT, c(-Inf, 20, 50, Inf), right = FALSE, labels = c("<20 CL", "20 to <50 CL", ">=50 CL")))
 fit_grp <- mmrm(CHG ~ AMYL_GRP * AVISIT + BASE + AGEYR + EDCCNTU + APOE4_AN + us(AVISIT | BID),
-                data = obs_chg, method = "Kenward-Roger")
+                data = obs_chg, method = "Kenward-Roger", vcov = "Kenward-Roger-Linear")
 lsm_grp <- as.data.frame(emmeans(fit_grp, ~ AMYL_GRP | AVISIT))
 write_csv(lsm_grp, file.path(OUT_TAB, "aim2_mmrm_lsmeans_by_amyloid.csv"))
 
@@ -37,19 +38,19 @@ write_csv(lsm_grp, file.path(OUT_TAB, "aim2_mmrm_lsmeans_by_amyloid.csv"))
 mm <- CHG ~ AMYL_GRP * AVISIT + BASE + AGEYR + EDCCNTU + APOE4_AN
 tvis <- ~ as.integer(AVISIT) | BID
 cands <- list(
-  "Compound symmetry"            = gls(mm, obs_chg, correlation = corCompSymm(form = tvis), method = "REML"),
-  "AR(1)"                        = gls(mm, obs_chg, correlation = corAR1(form = tvis),      method = "REML"),
-  "AR(1), heterogeneous var"     = gls(mm, obs_chg, correlation = corAR1(form = tvis),
+  "Compound symmetry"   = gls(mm, obs_chg, correlation = corCompSymm(form = tvis), method = "REML"),
+  "AR(1)"               = gls(mm, obs_chg, correlation = corAR1(form = tvis),      method = "REML"),
+  "Heterogeneous AR(1)" = gls(mm, obs_chg, correlation = corAR1(form = tvis),
                                        weights = varIdent(form = ~ 1 | AVISIT), method = "REML"),
-  "Unstructured"                 = gls(mm, obs_chg, correlation = corSymm(form = tvis),
+  "Unstructured"        = gls(mm, obs_chg, correlation = corSymm(form = tvis),
                                        weights = varIdent(form = ~ 1 | AVISIT), method = "REML",
                                        control = glsControl(maxIter = 200, msMaxIter = 200))
 )
 cov_tab <- tibble(structure = names(cands),
-                  n_cov_params = sapply(cands, function(f) length(unlist(f$modelStruct))),
+                  n_cov_params = sapply(cands, function(f) attr(logLik(f), "df") - length(coef(f))),  # incl. residual variance
                   AIC = sapply(cands, AIC), BIC = sapply(cands, BIC), logLik = sapply(cands, logLik)) %>%
   arrange(AIC)
-lrt_p <- anova(cands[["AR(1), heterogeneous var"]], cands[["Unstructured"]])$`p-value`[2]
+lrt_p <- anova(cands[["Heterogeneous AR(1)"]], cands[["Unstructured"]])$`p-value`[2]
 write_csv(cov_tab, file.path(OUT_TAB, "aim2_covariance_comparison.csv"))
 cat("\n=== Covariance structure comparison (REML) ===\n"); print(cov_tab)
 cat(sprintf("LRT heterogeneous AR(1) vs unstructured: p = %.3g\n", lrt_p))

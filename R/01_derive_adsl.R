@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------
-# 01_derive_adsl.R — subject-level analysis dataset (ADSL) from SUBJINFO
+# 01_derive_adsl.R: subject-level analysis dataset (ADSL) from SUBJINFO
 # Input : data/raw/SUBJINFO.csv  (A4/LEARN public release, Synapse syn61250768)
 # Output: data/derived/adsl.rds, output/tables/adsl_summary.csv
 # ------------------------------------------------------------------
@@ -23,14 +23,9 @@ adsl <- subj %>%
     SUVRCER   = as.numeric(SUVRCER),         # florbetapir SUVR (cerebellar reference)
     AMYLCENT  = as.numeric(AMYLCENT),        # centiloids
     MMSEBL    = as.numeric(MMSETSV1),
-    PACC_W240_SUBJ = as.numeric(PACCV6),     # subject-level PACC at V6; cross-checked vs ADQS later
-    TRTDUR_D  = as.numeric(TRTENDT_DAYS_T0) - as.numeric(TRTSTDT_DAYS_T0),
-    FRAMINGHAM
+    PACCBL    = as.numeric(PACCV6)           # released subject-level baseline PACC (visit 6)
   ) %>%
   mutate(
-    AMYL_TERT = if_else(SUBSTUDY %in% c("A4", "LEARN"),
-                        ntile(AMYLCENT, 3) |> factor(labels = c("T1 (low)", "T2", "T3 (high)")),
-                        factor(NA)),
     COHORT    = case_when(SUBSTUDY == "A4"    ~ paste("A4", TX),
                           SUBSTUDY == "LEARN" ~ "LEARN (Abeta-)",
                           TRUE ~ "Screen failure") |> factor()

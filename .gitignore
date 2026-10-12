@@ -7,3 +7,11 @@ output/**/*.rds
 .Rhistory
 .Rproj.user
 renv/library
+data/**
+!data/raw/
+!data/derived/
+!data/raw/.gitkeep
+!data/derived/.gitkeep
+*.sas7bdat
+.DS_Store
+shiny/rsconnect/

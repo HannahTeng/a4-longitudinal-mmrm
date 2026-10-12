@@ -1,7 +1,8 @@
 # ------------------------------------------------------------------
-# 03_mmrm_primary.R — Aim 1: A4 primary analysis replication
+# 03_mmrm_primary.R: Aim 1: A4 primary analysis replication
 # MMRM on change from baseline in PACC (mITT, double-blind period, wk 24-240)
 #   CHG ~ TX*AVISIT + BASE + AGEYR + EDCCNTU + APOE4_AN, unstructured covariance, Kenward-Roger df
+#   (linear covariance parameterization for the KR adjustment, which is what SAS DDFM=KR uses)
 # Compared against the published A4 result (Sperling et al., NEJM 2023).
 # ------------------------------------------------------------------
 source("R/00_config.R")
@@ -17,20 +18,20 @@ mitt <- adqs %>%
 message("MMRM analysis set: ", n_distinct(mitt$BID), " subjects, ", nrow(mitt), " post-baseline PACC records")
 
 fit_un <- mmrm(CHG ~ TX * AVISIT + BASE + AGEYR + EDCCNTU + APOE4_AN + us(AVISIT | BID),
-               data = mitt, reml = TRUE, method = "Kenward-Roger")
+               data = mitt, reml = TRUE, method = "Kenward-Roger", vcov = "Kenward-Roger-Linear")
 
 # LS-means by arm and visit; treatment difference at each visit (primary: Week 240)
 em   <- emmeans(fit_un, ~ TX | AVISIT)
 lsm  <- as.data.frame(em)
-diff <- as.data.frame(contrast(em, method = "revpairwise")) %>%   # Solanezumab - Placebo
+tx_diff <- as.data.frame(contrast(em, method = "revpairwise", adjust = "none")) %>%   # Solanezumab - Placebo
   mutate(lower = estimate - qt(0.975, df) * SE, upper = estimate + qt(0.975, df) * SE)
 
 write_csv(lsm,  file.path(OUT_TAB, "aim1_mmrm_lsmeans.csv"))
-write_csv(diff, file.path(OUT_TAB, "aim1_mmrm_tx_difference.csv"))
+write_csv(tx_diff, file.path(OUT_TAB, "aim1_mmrm_tx_difference.csv"))
 saveRDS(fit_un, "output/aim1_mmrm_fit.rds")
 
 cat("\n=== Treatment difference (Solanezumab - Placebo), change from baseline PACC ===\n")
-print(diff %>% select(AVISIT, estimate, SE, df, lower, upper, p.value) %>%
+print(tx_diff %>% select(AVISIT, estimate, SE, df, lower, upper, p.value) %>%
         mutate(across(c(estimate, SE, lower, upper), ~ round(.x, 3)), p.value = signif(p.value, 2)))
 
 # --- QC cross-check: same model via nlme::gls (independent implementation)

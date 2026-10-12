@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------
-# 02_derive_adqs.R — longitudinal analysis dataset (ADQS-style) for PACC
+# 02_derive_adqs.R: longitudinal analysis dataset (ADQS-style) for PACC
 # Input : data/raw/PACC.csv, data/derived/adsl.rds
 # Output: data/derived/adqs_pacc.rds
 # One row per subject x scheduled double-blind visit (baseline + every 24 wk to wk 240).

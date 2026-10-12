@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------
-# 05_tables_figures.R — Table 1, LS-means figures, spaghetti/mean trajectories
+# 05_tables_figures.R: Table 1, observed and LS-mean figures, trajectories by amyloid group
 # ------------------------------------------------------------------
 source("R/00_config.R")
 suppressPackageStartupMessages(library(ggplot2))
@@ -14,7 +14,7 @@ t1 <- adsl %>%
   mutate(grp = if_else(SUBSTUDY == "LEARN", "LEARN", as.character(TX))) %>%
   group_by(grp) %>%
   summarise(N = as.character(n()),
-            `Age, mean (SD)`          = sprintf("%.1f (%.1f)", mean(AGEYR), sd(AGEYR)),
+            `Age, mean (SD)`          = sprintf("%.1f (%.1f)", mean(AGEYR, na.rm=TRUE), sd(AGEYR, na.rm=TRUE)),
             `Female, n (%)`           = sprintf("%d (%.1f)", sum(SEX == "Female", na.rm=TRUE), 100*mean(SEX == "Female", na.rm=TRUE)),
             `Education yr, mean (SD)` = sprintf("%.1f (%.1f)", mean(EDCCNTU, na.rm=TRUE), sd(EDCCNTU, na.rm=TRUE)),
             `APOE4 carrier, n (%)`    = sprintf("%d (%.1f)", sum(APOE4 == "carrier", na.rm=TRUE), 100*mean(APOE4 == "carrier", na.rm=TRUE)),
@@ -52,15 +52,13 @@ ggsave(file.path(OUT_FIG, "fig2_mmrm_lsmeans_by_arm.png"), p2, width = 8, height
 
 # ---- Figure 3: spaghetti + loess by amyloid group (placebo + LEARN)
 obs <- adqs %>% filter(COHORT %in% c("A4 Placebo", "LEARN (Abeta-)"), !is.na(AVAL), !is.na(AMYLCENT)) %>%
-  mutate(AMYL_GRP = cut(AMYLCENT, c(-Inf, 20, 50, Inf), labels = c("<20 CL", "20-50 CL", ">50 CL")))
-set.seed(1)
-samp <- sample(unique(obs$BID), 150)
+  mutate(AMYL_GRP = cut(AMYLCENT, c(-Inf, 20, 50, Inf), right = FALSE, labels = c("<20 CL", "20 to <50 CL", ">=50 CL")))
+# Group-level smooths only: individual profiles are row-level DUA data and are not plotted in committed figures.
 p3 <- ggplot(obs, aes(AVISITN / 52.18, AVAL)) +
-  geom_line(data = filter(obs, BID %in% samp), aes(group = BID), alpha = 0.25, colour = "grey60") +
   geom_smooth(aes(colour = AMYL_GRP), method = "loess", se = TRUE, span = 1) +
   labs(x = "Years from baseline", y = "PACC composite score", colour = "Baseline amyloid",
-       title = "Untreated participants (A4 placebo + LEARN): PACC trajectories by amyloid burden",
-       subtitle = "Grey lines: 150 randomly sampled individual profiles") +
+       title = "PACC trajectories by baseline amyloid, untreated participants",
+       subtitle = "A4 placebo and LEARN; loess smooth with 95% band") +
   theme(legend.position = "bottom")
 ggsave(file.path(OUT_FIG, "fig3_trajectories_by_amyloid.png"), p3, width = 8, height = 5.5, dpi = 150)
 

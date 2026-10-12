@@ -12,10 +12,10 @@ data obs;
         and not missing(AGEYR) and not missing(EDCCNTU) and not missing(APOE4_AN);
   YEARS  = AVISITN / 52.18;
   CENT10 = AMYLCENT / 10;
-  length AMYL_GRP $8;
+  length AMYL_GRP $12;
   if AMYLCENT < 20 then AMYL_GRP = "<20 CL";
-  else if AMYLCENT <= 50 then AMYL_GRP = "20-50 CL";
-  else AMYL_GRP = ">50 CL";
+  else if AMYLCENT < 50 then AMYL_GRP = "20 to <50 CL";
+  else AMYL_GRP = ">=50 CL";
 run;
 
 /* (a) random slopes -- compare to output/tables/aim2_lmm_random_slope.csv */
@@ -33,15 +33,16 @@ data obs_chg; set obs; where AVISITN > 0 and not missing(CHG); run;
 %macro covfit(type, label, sastype);
   ods output FitStatistics=fs_&type;
   proc mixed data=obs_chg method=reml;
-    class BID AVISIT AMYL_GRP APOE4_AN(ref="non-carrier");
-    model CHG = AMYL_GRP AVISIT AMYL_GRP*AVISIT BASE AGEYR EDCCNTU APOE4_AN / ddfm=kr;
-    repeated AVISIT / subject=BID type=&sastype;
+    /* numeric AVISITN keeps the REPEATED levels in chronological order, which AR(1)/ARH(1) require */
+    class BID AVISITN AMYL_GRP APOE4_AN(ref="non-carrier");
+    model CHG = AMYL_GRP AVISITN AMYL_GRP*AVISITN BASE AGEYR EDCCNTU APOE4_AN / ddfm=kr;
+    repeated AVISITN / subject=BID type=&sastype;
   run;
   data fs_&type; length structure $32; set fs_&type; structure = "&label"; run;
 %mend;
 %covfit(cs,   Compound symmetry,   cs);
 %covfit(ar1,  AR(1),               ar(1));
-%covfit(arh1, AR(1) heterogeneous, arh(1));
+%covfit(arh1, Heterogeneous AR(1), arh(1));
 %covfit(un,   Unstructured,        un);
 
 data covcomp; set fs_cs fs_ar1 fs_arh1 fs_un; run;

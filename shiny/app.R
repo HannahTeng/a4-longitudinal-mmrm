@@ -28,7 +28,8 @@ load_default <- function() {
          label = "Simulated data with A4-like structure (no real participants)", real = FALSE)
   }
 }
-DEFAULT <- load_default()
+DEFAULT   <- load_default()
+SYNTHETIC <- readRDS(file.path("data", "synthetic_adqs.rds"))   # template rows always come from simulated data
 
 REQUIRED_COLS <- c("BID", "COHORT", "AVISITN", "AVAL", "AGEYR", "EDCCNTU", "SEX", "APOE4")
 OPTIONAL_COLS <- c("SITE", "BASE", "CHG", "AMYLCENT")
@@ -43,8 +44,10 @@ prepare_upload <- function(raw) {
   if (nrow(raw) > 60000) return(fail("File has ", nrow(raw), " rows; the limit is 60,000."))
 
   d <- raw[, intersect(c(REQUIRED_COLS, OPTIONAL_COLS), names(raw)), drop = FALSE]
-  for (v in intersect(c("AVISITN", "AVAL", "AGEYR", "EDCCNTU", "BASE", "CHG", "AMYLCENT"), names(d)))
-    if (!is.numeric(d[[v]])) return(fail("Column ", v, " must be numeric."))
+  for (v in intersect(c("AVISITN", "AVAL", "AGEYR", "EDCCNTU", "BASE", "CHG", "AMYLCENT"), names(d))) {
+    if (all(is.na(d[[v]])) && v %in% REQUIRED_COLS) return(fail("Column ", v, " is entirely missing."))
+    if (!is.numeric(d[[v]]) && !all(is.na(d[[v]]))) return(fail("Column ", v, " must be numeric."))
+  }
   d$BID <- as.character(d$BID); d$COHORT <- as.character(d$COHORT)
   d$SEX <- as.character(d$SEX); d$APOE4 <- as.character(d$APOE4)
 
@@ -55,8 +58,14 @@ prepare_upload <- function(raw) {
   if (any(tapply(d$COHORT, d$BID, dplyr::n_distinct) > 1)) return(fail("COHORT must be constant within subject."))
   nco <- dplyr::n_distinct(d$COHORT)
   if (nco < 2 || nco > 6) return(fail("COHORT must have between 2 and 6 levels (found ", nco, ")."))
+  if (any(d$AVISITN < 0) || any(d$AVISITN != round(d$AVISITN))) return(fail("AVISITN must be a non-negative whole number of weeks."))
   wks <- sort(unique(d$AVISITN))
   if (!0 %in% wks) return(fail("AVISITN must include a baseline visit coded 0."))
+  if (length(wks) < 2) return(fail("At least one post-baseline visit is required."))
+  no_bl <- setdiff(unique(d$COHORT), unique(d$COHORT[d$AVISITN == 0]))
+  if (length(no_bl)) return(fail("No baseline (week 0) records for cohort(s): ", paste(no_bl, collapse = ", "), "."))
+  for (v in c("SEX", "APOE4")) if (dplyr::n_distinct(na.omit(d[[v]])) < 2) return(fail(v, " must take both values; a constant covariate cannot be adjusted for."))
+  if (dplyr::n_distinct(na.omit(d$EDCCNTU)) < 2 || dplyr::n_distinct(na.omit(d$AGEYR)) < 2) return(fail("AGEYR and EDCCNTU must vary across subjects."))
   if (length(wks) > 15) return(fail("At most 15 distinct visits are supported (found ", length(wks), ")."))
 
   if (!"SITE" %in% names(d)) d$SITE <- NA_character_
@@ -85,8 +94,8 @@ ui <- page_navbar(
     textOutput("src_label") %>% tagAppendAttributes(class = "small text-muted"),
     checkboxGroupInput("cohorts", "Cohorts", choices = levels(DEFAULT$data$COHORT),
                        selected = levels(DEFAULT$data$COHORT)),
-    sliderInput("maxweek", "Follow-up window (weeks)", min = 24, max = max(DEFAULT$data$AVISITN),
-                value = max(DEFAULT$data$AVISITN), step = 24),
+    selectInput("maxweek", "Follow-up through week",
+                choices = sort(unique(DEFAULT$data$AVISITN))[-1], selected = max(DEFAULT$data$AVISITN)),
     selectInput("strat", "Stratify trajectories by",
                 c("Cohort" = "COHORT", "APOE4" = "APOE4", "Baseline amyloid (centiloids)" = "AMYL_GRP", "Sex" = "SEX")),
     hr(),
@@ -122,12 +131,15 @@ ui <- page_navbar(
           tags$li("Inference: Kenward-Roger degrees of freedom; LS-means and cohort contrasts by visit via ", tags$code("emmeans"), "."),
           tags$li("Missing data: ignorable (MAR) given the covariates and observed outcome history.")
         ),
-        h6("Independent SAS implementation"),
-        p("The primary analysis is double-programmed. The same model is fitted in R (", tags$code("mmrm::mmrm"),
-          ") and, separately, in SAS (", tags$code("PROC MIXED"), " with ", tags$code("REPEATED / TYPE=UN"), " and ",
-          tags$code("DDFM=KR"), "). Within R, ", tags$code("nlme::gls"), " with ", tags$code("corSymm"), " and ", tags$code("varIdent"),
-          " serves as a further cross-check. Results of the R-versus-SAS comparison are on the Validation tab; the SAS programs are in ",
-          "the repository under ", tags$code("sas/"), ".")
+        h6("Second engine: SAS"),
+        p("The primary analysis model is fitted by two engines. R (", tags$code("mmrm::mmrm"),
+          ") is the primary implementation; SAS (", tags$code("PROC MIXED"), " with ", tags$code("REPEATED / TYPE=UN"), " and ",
+          tags$code("DDFM=KR"), ") independently refits the same model from the exported analysis dataset, without using any R model output. ",
+          "Within R, ", tags$code("nlme::gls"), " with ", tags$code("corSymm"), " and ", tags$code("varIdent"),
+          " is an additional check on the fixed effects. The R-versus-SAS comparison is on the Validation tab; the SAS programs are in ",
+          "the repository under ", tags$code("sas/"), "."),
+        p(class = "small text-muted", "Contrasts in the MMRM tab are unadjusted for multiplicity. LS-means weight categorical covariates ",
+          "(APOE4) equally, as SAS LSMEANS does by default.")
       ),
       card(
         card_header("Tabs"),
@@ -217,10 +229,10 @@ server <- function(input, output, session) {
 
   # push a new dataset into the sidebar controls
   sync_inputs <- function(d) {
-    lv <- levels(d$COHORT); wk <- sort(unique(d$AVISITN)); step <- if (length(wk) > 1) min(diff(wk)) else 24
+    lv <- levels(d$COHORT); wk <- sort(unique(d$AVISITN))
     updateCheckboxGroupInput(session, "cohorts", choices = lv, selected = lv)
     updateSelectInput(session, "ref", choices = lv, selected = lv[1])
-    updateSliderInput(session, "maxweek", min = wk[min(2, length(wk))], max = max(wk), value = max(wk), step = step)
+    updateSelectInput(session, "maxweek", choices = wk[-1], selected = max(wk))
     ch <- c("Cohort" = "COHORT", "APOE4" = "APOE4", "Sex" = "SEX")
     if (any(!is.na(d$AMYLCENT))) ch <- c(ch, "Baseline amyloid (centiloids)" = "AMYL_GRP")
     updateSelectInput(session, "strat", choices = ch, selected = "COHORT")
@@ -244,27 +256,31 @@ server <- function(input, output, session) {
   observeEvent(input$reset, {
     rv$src <- DEFAULT; rv$msg <- NULL; sync_inputs(DEFAULT$data)
   })
+  observeEvent(input$cohorts, {
+    sel <- if (isTRUE(input$ref %in% input$cohorts)) input$ref else input$cohorts[1]
+    updateSelectInput(session, "ref", choices = input$cohorts, selected = sel)
+  })
   output$upload_msg <- renderUI(if (!is.null(rv$msg)) div(class = paste("small", if (rv$msg$ok) "text-success" else "text-danger"), rv$msg$text))
   output$src_label  <- renderText(rv$src$label)
 
   output$template <- downloadHandler(
     filename = function() "pacc_upload_template.csv",
     content = function(file) {
-      keep <- DEFAULT$data %>% distinct(BID, COHORT) %>% group_by(COHORT) %>% slice_head(n = 2) %>% pull(BID)
-      d <- DEFAULT$data %>% filter(BID %in% keep) %>%
+      keep <- SYNTHETIC %>% distinct(BID, COHORT) %>% group_by(COHORT) %>% slice_head(n = 2) %>% pull(BID)
+      d <- SYNTHETIC %>% filter(BID %in% keep) %>%
         select(BID, COHORT, AVISITN, AVAL, AGEYR, EDCCNTU, SEX, APOE4, SITE, AMYLCENT)
       write.csv(d, file, row.names = FALSE, na = "")
     })
 
   dat <- reactive({
     req(input$cohorts)
-    adqs() %>% filter(COHORT %in% input$cohorts, AVISITN <= input$maxweek) %>%
-      mutate(AMYL_GRP = cut(AMYLCENT, c(-Inf, 20, 50, Inf), labels = c("<20 CL", "20-50 CL", ">50 CL")),
+    adqs() %>% filter(COHORT %in% input$cohorts, AVISITN <= as.numeric(req(input$maxweek))) %>%
+      mutate(AMYL_GRP = cut(AMYLCENT, c(-Inf, 20, 50, Inf), right = FALSE, labels = c("<20 CL", "20 to <50 CL", ">=50 CL")),
              AVISIT = droplevels(AVISIT), COHORT = droplevels(COHORT))
   })
   complete_cases <- reactive(
     dat() %>% filter(AVISITN > 0, !is.na(CHG), !is.na(BASE), !is.na(AGEYR), !is.na(EDCCNTU), !is.na(APOE4)) %>%
-      mutate(BID = factor(BID)))
+      mutate(BID = factor(BID), AVISIT = droplevels(AVISIT), COHORT = droplevels(COHORT)))
 
   # --- KPIs
   output$n_subj <- renderText(format(n_distinct(dat()$BID), big.mark = ","))
@@ -304,7 +320,7 @@ server <- function(input, output, session) {
     g <- ggplot() +
       geom_line(data = filter(d, BID %in% samp), aes(AVISITN, AVAL, group = BID), colour = "grey75", alpha = 0.5) +
       geom_line(data = m, aes(AVISITN, m, colour = grp), linewidth = 1.2) +
-      geom_point(data = m, aes(AVISITN, m, colour = grp, text = sprintf("%s<br>Week %d: mean PACC %.2f", grp, AVISITN, m))) +
+      geom_point(data = m, aes(AVISITN, m, colour = grp, text = sprintf("%s<br>Week %g: mean PACC %.2f", grp, AVISITN, m))) +
       scale_colour_manual(values = pal) + scale_x_continuous(breaks = weeks()) +
       labs(x = "Week", y = "PACC composite", colour = NULL) + theme_minimal()
     ggplotly(g, tooltip = "text") %>% layout(legend = list(orientation = "h", y = -0.25))
@@ -314,7 +330,7 @@ server <- function(input, output, session) {
     d <- dat() %>% filter(AVISITN > 0, !is.na(CHG), !is.na(.data[[input$strat]])) %>%
       group_by(grp = .data[[input$strat]], AVISITN) %>% summarise(m = mean(CHG), se = sd(CHG) / sqrt(n()), n = n(), .groups = "drop")
     req(nrow(d) > 0)
-    g <- ggplot(d, aes(AVISITN, m, colour = grp, text = sprintf("%s<br>Week %d: %.2f +/- %.2f (n=%d)", grp, AVISITN, m, se, n))) +
+    g <- ggplot(d, aes(AVISITN, m, colour = grp, text = sprintf("%s<br>Week %g: %.2f +/- %.2f (n=%d)", grp, AVISITN, m, se, n))) +
       geom_hline(yintercept = 0, colour = "grey70") +
       geom_errorbar(aes(ymin = m - se, ymax = m + se), width = 5) + geom_line(aes(group = grp)) + geom_point() +
       scale_colour_manual(values = pal) + scale_x_continuous(breaks = weeks()) +
@@ -324,26 +340,32 @@ server <- function(input, output, session) {
 
   # --- MMRM
   observeEvent(input$fit, {
-    d <- complete_cases() %>% mutate(COHORT = relevel(COHORT, input$ref))
-    if (nlevels(d$COHORT) < 2) { showNotification("Select at least two cohorts.", type = "error"); return() }
+    d <- complete_cases()
+    dropped <- setdiff(input$cohorts, levels(d$COHORT))
+    if (nlevels(d$COHORT) < 2) { showNotification("At least two cohorts with post-baseline data are required.", type = "error"); return() }
+    if (!isTRUE(input$ref %in% levels(d$COHORT))) {
+      showNotification("The reference cohort has no analyzable post-baseline data in the current selection.", type = "error"); return() }
+    d$COHORT <- relevel(d$COHORT, input$ref)
     res <- tryCatch(withProgress(message = "Fitting MMRM (unstructured covariance)...", {
-      f <- mmrm(CHG ~ COHORT * AVISIT + BASE + AGEYR + EDCCNTU + APOE4 + us(AVISIT | BID), data = d, method = "Kenward-Roger")
+      f <- mmrm(CHG ~ COHORT * AVISIT + BASE + AGEYR + EDCCNTU + APOE4 + us(AVISIT | BID), data = d,
+                method = "Kenward-Roger", vcov = "Kenward-Roger-Linear")
       em <- emmeans(f, ~ COHORT | AVISIT)
-      list(fit = f, n = n_distinct(d$BID), rows = nrow(d), wks = sort(unique(d$AVISITN)),
-           lsm = as.data.frame(em) %>% mutate(week = as.integer(gsub("Week ", "", AVISIT))),
-           diff = as.data.frame(contrast(em, "trt.vs.ctrl")) %>%
+      list(fit = f, n = n_distinct(d$BID), rows = nrow(d), dropped = dropped,
+           lsm = as.data.frame(em) %>% left_join(distinct(d, AVISIT, week = AVISITN), by = "AVISIT"),
+           diff = as.data.frame(contrast(em, "trt.vs.ctrl", adjust = "none")) %>%
              mutate(lower = estimate - qt(0.975, df) * SE, upper = estimate + qt(0.975, df) * SE))
-    }), error = function(e) { showNotification(paste("MMRM did not converge:", conditionMessage(e)), type = "error", duration = 10); NULL })
+    }), error = function(e) { showNotification(paste("MMRM fit failed:", conditionMessage(e)), type = "error", duration = 10); NULL })
     fit_res(res)
   })
   output$fit_msg <- renderPrint({
     f <- req(fit_res())
-    cat(sprintf("Subjects: %d\nPost-baseline records: %d\nConverged: %s\nAIC: %.1f\n",
+    cat(sprintf("Subjects: %d\nPost-baseline records: %d\nConverged: %s\nREML AIC: %.1f\n",
                 f$n, f$rows, if (isTRUE(f$fit$opt_details$convergence == 0)) "yes" else "check", AIC(f$fit)))
+    if (length(f$dropped)) cat("Excluded (no analyzable post-baseline data):", paste(f$dropped, collapse = ", "), "\n")
   })
   output$p_lsm <- renderPlotly({
     l <- req(fit_res())$lsm
-    g <- ggplot(l, aes(week, emmean, colour = COHORT, text = sprintf("%s<br>Week %d: %.2f (%.2f, %.2f)", COHORT, week, emmean, lower.CL, upper.CL))) +
+    g <- ggplot(l, aes(week, emmean, colour = COHORT, text = sprintf("%s<br>Week %g: %.2f (%.2f, %.2f)", COHORT, week, emmean, lower.CL, upper.CL))) +
       geom_hline(yintercept = 0, colour = "grey70") +
       geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL), width = 5) + geom_line(aes(group = COHORT)) + geom_point(size = 2) +
       scale_colour_manual(values = pal) + scale_x_continuous(breaks = weeks()) +
@@ -352,13 +374,16 @@ server <- function(input, output, session) {
   })
   output$t_diff <- renderDT({
     req(fit_res())$diff %>% transmute(Contrast = contrast, Visit = AVISIT, Estimate = round(estimate, 3), SE = round(SE, 3),
-                             df = round(df, 1), `95% CI` = sprintf("(%.3f, %.3f)", lower, upper), p = signif(p.value, 2)) %>%
-      datatable(options = list(pageLength = 12, dom = "tp"), rownames = FALSE)
+                             df = round(df, 1), `95% CI` = sprintf("(%.3f, %.3f)", lower, upper), `p (unadjusted)` = signif(p.value, 2)) %>%
+      datatable(options = list(pageLength = 12, dom = "tp"), rownames = FALSE,
+                caption = "Two-sided t-tests with Kenward-Roger df; no multiplicity adjustment across visits or contrasts.")
   })
 
   # --- covariance comparison
   observeEvent(input$fitcov, {
     d <- complete_cases()
+    if (nlevels(d$COHORT) < 2) { showNotification("At least two cohorts with post-baseline data are required.", type = "error"); return() }
+    if (nrow(d) > 20000) { showNotification("Covariance comparison is limited to 20,000 post-baseline records; narrow the selection.", type = "error"); return() }
     mm <- CHG ~ COHORT * AVISIT + BASE + AGEYR + EDCCNTU + APOE4
     tv <- ~ as.integer(AVISIT) | BID
     res <- tryCatch(withProgress(message = "Fitting four covariance structures...", {
@@ -368,7 +393,7 @@ server <- function(input, output, session) {
         "Heterogeneous AR(1)"  = gls(mm, d, correlation = corAR1(form = tv), weights = varIdent(form = ~ 1 | AVISIT), method = "REML"),
         "Unstructured"         = gls(mm, d, correlation = corSymm(form = tv), weights = varIdent(form = ~ 1 | AVISIT),
                                      method = "REML", control = glsControl(maxIter = 200, msMaxIter = 200)))
-      tab <- tibble(Structure = names(fits), `Cov. parameters` = sapply(fits, function(f) length(unlist(f$modelStruct))),
+      tab <- tibble(Structure = names(fits), `Cov. parameters` = sapply(fits, function(f) attr(logLik(f), "df") - length(coef(f))),
                     AIC = round(sapply(fits, AIC), 1), BIC = round(sapply(fits, BIC), 1), logLik = round(sapply(fits, logLik), 1)) %>% arrange(AIC)
       list(tab = tab, lrt = anova(fits[["Heterogeneous AR(1)"]], fits[["Unstructured"]]))
     }), error = function(e) { showNotification(paste("Covariance fit failed:", conditionMessage(e)), type = "error", duration = 10); NULL })
